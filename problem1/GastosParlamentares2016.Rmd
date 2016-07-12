@@ -1,0 +1,120 @@
+---
+title: "Gastos de Parlamentares em 2016"
+output: html_document
+---
+```{r, echo=FALSE}
+library(dplyr, warn.conflicts = FALSE)
+library(readr)
+library(knitr)
+library(ggplot2)
+```
+
+# Introdução
+Os dados coletados abaixo foram coletados do site de transparência da câmara dos deputados. Esses dados contém todos os gastos de nossos deputados em 2016 usando a sua cota para exercício da atividade parlamentar
+
+## Tratando dos Dados
+```{r}
+ler_gastos <- function(arquivo = "../datasets/gastos.csv") { 
+  #' Lê um csv criado a partir dos dados de gastos dos deputados da 
+  #' Câmara e seta os tipos de colunas mais convenientemente. 
+  require("readr")
+  require("dplyr", warn.conflicts = FALSE)
+  
+  gastos = read_csv(arquivo, col_types = list(datEmissao = col_datetime()))
+  gastos = gastos %>% 
+    mutate_each(funs(as.factor), sgPartido, sgUF, txNomeParlamentar, indTipoDocumento, numMes)
+  
+  levels(gastos$numMes) = 
+    list("Janeiro"="1", "Fevereiro"="2", "Março"="3", "Abril"="4", "Maio"="5", "Junho"="6", "Julho"="7")
+  
+  return(gastos)
+}
+```
+
+## Carregando os Dados
+```{r}
+parlamentares = ler_gastos()
+
+parlamentares = parlamentares %>% 
+  select(txNomeParlamentar, sgUF, sgPartido, txtDescricao, vlrDocumento, txtMes = numMes)
+```
+
+# Questões
+
+1. Usando esses dados, crie um panorama que mostre um panorama dos dados que embase respostas suas sobre 
+
+  a. Escolha um subconjunto das variáveis que você considera interessante para investigar como nossos deputados gastam sua verba e comente qual a distribuição dos dados dessas variáveis, em termos de centralidade, extremos, concentração e simetria.
+  
+  + R: Vamos analisar o total de Gastos dos nossos deputados agrupando por Tipo de Despesa por Mês
+
+```{r, echo=FALSE}
+data = parlamentares %>% group_by(Descricao = txtDescricao) %>%
+  summarise(Gastos = sum(vlrDocumento)) %>% arrange(Descricao)
+
+kable(data)
+```
+  
+  + Logo, a distribuição dos dados dessas variáveis em termos de centralidade, extremos, concentração e simetria é dada pelos dados abaixo:
+  
+```{r, echo=FALSE}
+summary(data$Gastos)
+```
+
+  b. Há algo surpreendente ou estranho nos dados? 
+
+  + R: Sim, os valores de documentos (gastos) negativos dificultando a analise dos dados.   
+  
+  c. Como você sugere que um analista de dados lide com a parte surpreendente/estranha?
+  
+  + R: Eu aconselharia sua analise dos dados agrupados por tipo de despesa (como foi feito da questão 2) ou por parlamentar.
+
+2. Responda:
+
+  a. Em que tipo de despesas nossos parlamentares gastam mais recursos de sua cota? 
+```{r, fig.width=12, echo=FALSE}
+data = parlamentares %>% group_by(Descricao = txtDescricao) %>%
+  summarise(vlrGastos = sum(vlrDocumento), numDocumentos = length(Descricao))
+
+ggplot(data, mapping = aes(x = Descricao, y = vlrGastos/1e+06)) +
+  geom_bar(stat = "identity") +
+  geom_bar(data = data %>% filter(vlrGastos == max(vlrGastos)), stat = "identity", 
+             mapping = aes(x = Descricao, y = vlrGastos/1e+06, 
+                           fill = "Dispesa que gasta mais recursos")) +
+  scale_fill_discrete(name = "Descrição:") + 
+  theme(legend.position="top") +
+  ylab("Gastos (em milhões de reais)") + xlab("Tipos de Dispesas") + 
+  ggtitle("Gastos por Tipos de Dispesas") + 
+  coord_flip()
+```
+
+  b. Quais tipos de despesas têm despesas que mais variam, que têm valores mais desiguais?
+```{r, fig.width=12, echo=FALSE}
+data = parlamentares %>% group_by(Descricao = txtDescricao, Mes = txtMes) %>%
+  summarize(Gastos = sum(vlrDocumento)) %>% 
+  group_by(Descricao) %>%
+  summarise(Min = min(Gastos), Lower = max(0, mean(Gastos) - sd(Gastos)), Media = mean(Gastos), 
+            Upper = mean(Gastos) + sd(Gastos), Max = max(Gastos), Variancia = var(Gastos))
+
+ggplot(data, aes(Descricao)) +
+  geom_boxplot(aes(ymin = Min/1e+06, lower = Lower/1e+06, 
+                   middle = Media/1e+06, upper = Upper/1e+06, ymax = Max/1e+06), 
+               stat = "identity") + 
+  geom_boxplot(data = data %>% filter(Variancia == max(Variancia)), 
+             mapping = aes(ymin = Min/1e+06, lower = Lower/1e+06, 
+                           middle = Media/1e+06, upper = Upper/1e+06, ymax = Max/1e+06, 
+                           colour = "Gatos com valores mais desiguais"), stat = "identity") +
+  geom_jitter(data = parlamentares %>% 
+                group_by(Descricao = txtDescricao, Mes = txtMes) %>% 
+                summarize(Gastos = sum(vlrDocumento)), 
+              mapping = aes(x = Descricao, y = Gastos/1e+06), 
+              width = 0.01) +
+  geom_jitter(aes(y = Min/1e+06, color = "Min Values"), width = 0.01) +
+  geom_jitter(aes(y = Max/1e+06, color = "Max Values"), width = 0.01) + 
+  scale_y_sqrt() +
+  scale_colour_discrete(name = "Descrição:") + 
+  theme(legend.position="top") +
+  ylab("Gastos (em milhões de reais)") + xlab("Tipos de Gastos") + 
+  ggtitle("Variância dos Gatos por Tipo") + 
+  coord_flip()
+```
+
