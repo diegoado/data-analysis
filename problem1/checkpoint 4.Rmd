@@ -1,0 +1,124 @@
+---
+title: "Gastos de Parlamentares em 2016"
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(dplyr, warn.conflicts = FALSE)
+library(readr)
+library(knitr)
+library(ggplot2)
+```
+
+# Introdução
+Os dados coletados abaixo foram coletados do site de transparência da câmara dos deputados. Esses dados contém todos os gastos de nossos deputados em 2016 de Janeiro a Maio, usando a sua cota para exercício da atividade parlamentar
+
+## Tratando dos Dados
+```{r}
+ler_gastos <- function(arquivo = "../datasets/gastos.csv") {
+  #' Lê um csv criado a partir dos dados de gastos dos deputados da
+  #' Câmara e seta os tipos de colunas mais convenientemente.
+  require("readr")
+  require("dplyr", warn.conflicts = FALSE)
+
+  gastos = read_csv(arquivo, col_types = list(datEmissao = col_datetime()))
+  gastos = gastos %>%
+    mutate_each(funs(as.factor), sgPartido, sgUF, txNomeParlamentar, indTipoDocumento, numMes)
+
+  levels(gastos$numMes) =
+    list("Janeiro"="1", "Fevereiro"="2", "Março"="3", "Abril"="4", "Maio"="5", "Junho"="6", "Julho"="7")
+
+  return(gastos)
+}
+
+ler_cotas <- function(arquivo = "../datasets/cota.csv") {
+  
+  cota = read.csv(arquivo, sep = ";", dec = ",")
+  return(cota)
+}
+```
+
+## Carregando os Dados
+```{r}
+parlamentares = ler_gastos()
+
+data = parlamentares %>% 
+  filter(!is.na(sgPartido), 
+         sgPartido != "S.PART.", 
+         numMes != "Junho", numMes != "Julho") %>%
+  group_by(parlamentar = txNomeParlamentar, estado = sgUF, partido = sgPartido, mes = numMes) %>%
+  summarise(gastos = sum(vlrDocumento)) %>%
+  inner_join(ler_cotas(), by = c("estado" = "estado"))
+```
+
+## Questões
+
+1. Qual é a distribuição dos gastos por partido, levando em consideração o tamanho da sua bancada?
+
+  + Como estamos interessados em analisar os gastos dos nossos parlamentares, levando em consideração o número de deputados em cada partido, então vamos então analizar a tabela abaixo:
+  
+```{r, echo=FALSE}
+data = data %>% 
+  filter(partido != "PRP", partido != "PRTB") %>%
+  group_by(Partido = partido) %>% 
+  summarise(Bancada = n_distinct(parlamentar), Gastos = sum(gastos), Cota = sum(vlrCota))
+
+kable(data)
+```
+
+  + Descrição dos Dados:
+  
+    + <b>Partido</b>: É um partido político que possui representação na câmara dos deputados;
+    + <b>Bancada</b>: O número de deputados que o partido possui;
+    + <b>Gastos</b> : A soma de todos os gastos de todos os deputados daquele partido;
+    + <b>Cota</b>   : A soma da cota parlamentar de todos os deputados daquele partido;
+<br><br>
+  + Agora vamos analizar nossos dados graficamente:
+  
+```{r, fig.align='center', echo=FALSE}
+ggplot(data, mapping = aes(x = Gastos/1e+06, y = Bancada)) + 
+  geom_point() + geom_line() + 
+  geom_smooth(method = "lm") +
+  xlab("Gastos (em milhões de reais)") + ylab("Número de deputados")
+```
+
+  + Assim, podemos dizer que os gatos dos partidos aumentem de acordo com o tamanho da sua bancada, conforme a reta de regressão <font color="blue">azul</font> no gráfico;
+  
+  + Podemos agora fazer a seguinte pergunta, existe algum partido que gasta mais que a sua cota?
+
+```{r, fig.align='center', echo=FALSE}
+ggplot(data) + 
+  geom_line(mapping = aes(x = Gastos/1e+06, y = Bancada, colour = "Gasto Real")) +
+  geom_line(mapping = aes(x = Cota/1e+06, y = Bancada, colour = "Gasto Máximo")) +
+  xlab("Gastos (em milhões de reais)") + ylab("Número de deputados") +
+  scale_colour_discrete(name = "Descrição:") +
+  theme(legend.position="top") +
+  scale_x_sqrt() + 
+  coord_flip()
+```
+
+  + Para esta nossa nova apesar do elevadíssimo gasto parlamentar nenhum partido gasta mais que o valor a sua cota;
+  
+2. Qual os gastos mais comuns por deputado?
+
+```{r, echo=FALSE}
+data = parlamentares %>% 
+  filter(!is.na(sgPartido), sgPartido != "S.PART.", 
+         numMes != "Junho", numMes != "Julho") %>%
+  group_by(Gasto = txtDescricao) %>%
+  summarise(Quantidade = length(Gasto), numParlamentares = n_distinct(txNomeParlamentar)) 
+```
+
+```{r, fig.width=12, echo=FALSE}
+ggplot(data) +
+  geom_point(mapping = aes(x = numParlamentares, y = Quantidade, colour = Gasto)) +
+  ylab("Número de Documentos") + xlab("Número de deputados") +
+  scale_colour_discrete(name = "Tipo de Gasto") +
+  scale_x_sqrt()
+```
+ 
+  + Com a ajuda da gráfico acima podemos identificar que os três tipos de gastos mais comuns são entre os deputados são:
+ 
+    + Emissão de Bilhete Aéreo,
+    + Combustíveis e Lubrificantes e
+    + Telefonia

@@ -1,0 +1,87 @@
+---
+title: "Gastos de Parlamentares de Janeiro a Maio de 2016"
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(dplyr, warn.conflicts = FALSE)
+library(readr)
+library(ggplot2)
+```
+
+# Introdução
+Os dados deste relatório foram coletados do site de transparência da câmara dos deputados. Esses dados contém todos os gastos de nossos deputados em 2016 de Janeiro a Maio, usando a sua cota para exercício da atividade parlamentar.
+
+```{r, echo=FALSE}
+ler_gastos <- function(arquivo = "../datasets/gastos.csv") {
+  #' Lê um csv criado a partir dos dados de gastos dos deputados da
+  #' Câmara e seta os tipos de colunas mais convenientemente.
+  require("readr")
+  require("dplyr", warn.conflicts = FALSE)
+
+  gastos = read_csv(arquivo, col_types = list(datEmissao = col_datetime()))
+  gastos = gastos %>%
+    mutate_each(funs(as.factor), sgPartido, sgUF, txNomeParlamentar, indTipoDocumento, numMes)
+
+  levels(gastos$numMes) =
+    list("Janeiro"="1", "Fevereiro"="2", "Março"="3", "Abril"="4", "Maio"="5", "Junho"="6", "Julho"="7")
+
+  return(gastos)
+}
+
+grange <- function(x) {
+  #' Função auxiliar para categorizar as gastos dos partidos de interesse 
+  clazz = seq(50, 700, by = 50)
+  for (i in 1:length(clazz)) {
+    if (x < 10)
+      return(0)
+    else if (x / clazz[i] < 1)
+      return(i)
+  }
+  return(length(clazz))
+}
+```
+
+```{r, echo=FALSE}
+parlamentares = ler_gastos()
+
+manual.colours = c("black", "orange", "green", "cyan", "red", "yellow", "violet", "navy", "blue", "gold", "pink", "dark green", "gray", "brown")
+
+data = parlamentares %>% 
+  filter(
+    !is.na(sgPartido), sgPartido != "S.PART.", numMes != "Junho", numMes != "Julho") %>%
+  group_by(
+    descricao = txtDescricao, partido = sgPartido, mes = numMes) %>% 
+  summarise(gastos = sum(vlrDocumento)/1e+03, clazz = grange(gastos)) 
+
+data = data %>% 
+  filter(partido %in% 
+      c("PP", "PTB", "PSC", "PEN", "PMDB", "PT", "PSDB", "PR", "PSD", "PSB", "DEM", "PRB", "PDT", "PTN", "PTdoB", "PSL", "SD", "PCdoB"))
+```
+
+# Discurção dos Dados
+Os dados abaixo mostram a distribuição dos gastos dos parlamenteres agrupados por partido e discriminando o tipo de gasto. Cada ponto no gráfico representa a soma de dos gastos, em milhares de reais, de todos os parlamentares de um partido X em um mês Y. 
+
+```{r, fig.height=10, fig.width=16, echo=FALSE}
+ggplot(data, aes(x = mes, y = descricao)) + 
+  geom_point(aes(size = clazz + 1, colour = as.factor(ifelse(clazz, clazz * 50, 5))), alpha = 0.8) + 
+  facet_wrap(~partido, ncol = 6) + 
+  theme(text = element_text(size=14), axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  scale_color_manual(values = manual.colours) + 
+  scale_size(guide = FALSE) +
+  xlab("MÊS") + ylab("DESCRIÇÃO DO GASTOS") +
+  labs(colour = "Gastos (em milhares de reais):")
+```
+
+Observações:
+
+  + Os partidos analisados são aqueles que possuem um bancada com dez ou mais representantes na câmara federal;
+  + Os Gastos foram divididos em classes de intervalos de 50 mil reais; 
+
+# Conclusão
+Várias informações sobre a distribuição dos gastos dos parlamentares podem ser extraidas do gráfico acima, por exemplo:
+
+  + Todos os partidos, exceto o PSL, o PTdoB e o PEN gastam mais com a divulgação de atividade parlamentar que qualquer outro tipo de gasto;
+  + O mês com a maior concentração de gastos é Março;
+  + O partido com os maiores gastos é o PMDB;
+  + etc.
