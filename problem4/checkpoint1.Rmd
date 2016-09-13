@@ -64,11 +64,11 @@ mean.t3 = CI.percentile(t3.boot, probs = c(.025, .975))
 
 ```{r}
 df = data.frame(rbind(mean.t1, mean.t2, mean.t3))
-df$mean = row.names(df)
+df$mean = c("The Terminator", "Terminator 2: Judgment Day", "Terminator 3: Rise of the Machines")
 
 df %>% 
-  ggplot(aes(x = mean, ymin = X2.5., ymax = X97.5.)) + 
-  geom_errorbar(width = .2)
-
+  ggplot(aes(x = reorder(mean, c(1, 2, 3)), ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + 
+  xlab("Mean of Rating")
 ```
 
