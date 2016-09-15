@@ -1,0 +1,74 @@
+---
+title: "Analise das Emendas Parlarmentares 2015-2016"
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(readr)
+library(ggplot2)
+library(ggfortify, quietly = TRUE)
+library(cluster)
+library(dplyr, warn.conflicts = FALSE)
+
+theme_set(theme_bw())
+```
+
+
+```{r, echo=FALSE}
+getEmendas <- function(arquivo = "datasets/emendas.csv") {
+  #' Lê um csv criado a partir emendas de parlementares
+  require("readr")
+  library(dplyr, warn.conflicts = FALSE)
+  
+  emendas = read_csv(arquivo)
+  emendas = emendas %>% 
+    select(NOME_PARLAMENTAR, Saúde, Segurança=`Segurança Pública`, Urbanismo)
+  
+  return(emendas)
+}
+```
+
+```{r}
+# Porcentagem da variância explicada: 
+plot_pve = function(prout){
+  pr.var = prout$sdev^2
+  pve = pr.var / sum(pr.var)
+  
+  df = data.frame(x = 1:NROW(pve), y = cumsum(pve))
+  ggplot(df, aes(x = x, y = y)) + 
+    geom_point(size = 3) + 
+    geom_line() + 
+    labs(x='Principal Component', y = 'Cumuative Proportion of Variance Explained')
+}
+```
+
+PCA
+
+```{r}
+#' Carregando arquivo .csv com as emendas parlamentares
+em = getEmendas()
+
+#' Altegrando valores com zero para NA
+em[em == 0] = NA
+
+#' Ajustando scala dos valores para ajudar na visualização dos dados
+em.scaled = log(em[,2:4])
+
+em.scaled = em.scaled %>% mutate_each(funs(scale))
+em.scaled$NOME_PARLAMENTAR = em$NOME_PARLAMENTAR
+
+#' Altegrando valores com NA para 0
+em[is.na(em)] = 0
+em.scaled[is.na(em.scaled)] = 0
+
+em.pca = em.scaled %>% select(-NOME_PARLAMENTAR) %>% prcomp(scale = TRUE)
+```
+
+```{r}
+plot_pve(em.pca)
+```
+
+```{r}
+autoplot(em.pca, size = 3, loadings = TRUE, loadings.colour = 'blue', 
+         loadings.label = TRUE, loadings.label.size = 3)
+```

@@ -3,19 +3,20 @@ title: "Dados de opiniões sobre filmes"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-library(dplyr)
-library(ggplot2, warn.conflicts = FALSE)
+```{r global_options, include=FALSE}
+library(readr)
 library(resample)
+library(dplyr, warn.conflicts = FALSE)
+library(ggplot2, warn.conflicts = FALSE)
 
 theme_set(theme_bw())
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=10, fig.height=6, echo=FALSE, warning=FALSE, message=FALSE)
 ```
 
 ```{r}
 read <- function(file) {
   #' Lê um csv criado a partir dos dados de gastos dos deputados da
-  require("readr")
+  require("readr", warn.conflicts = FALSE)
 
   file = read_csv(file, col_types = list(.default = col_character()))
   return(file)
@@ -25,50 +26,83 @@ get_database <- function() {
   #' Trabalha os dados de forma mais convenientemente para resolver o problema.
   require("dplyr", warn.conflicts = FALSE)
   
-  movies = read("datasets/movies/movies.csv")
-  rating = read("datasets/movies/rating.csv")
+  movies = read("../datasets/movies/movies.csv")
+  rating = read("../datasets/movies/rating.csv")
   
   dataframe = rating %>% 
     select(-userId, -timestamp) %>% left_join(movies, by = c("movieId" = "movieId")) %>%
     rowwise() %>% 
-    mutate(countGen = length(unlist(strsplit(genres, '[|]'))), title = unlist(strsplit(as.character(title), " \\(.*\\)")))
+    mutate(countGen = length(unlist(strsplit(genres, '[|]'))), 
+           title = unlist(strsplit(as.character(title), " \\(.*\\)")))
   
   return(dataframe)
 }
 
 ```
 
-1. Qual dos episódios de Exterminator do Futuro (Terminator) é melhor avaliado e para qual possui mais variação em suas notas.
+```{r}
+get_bootstrap <- function(base, movies, sample.len, func = 1) {
+  require("resample")
+  require("dplyr", warn.conflicts = FALSE)
+  
+  lowerbound=c() 
+  upperbound=c()
+  
+  for (i in 1:length(movies)) {
+    data = base %>% filter(title == movies[i])
+    if (func != 1)
+      boot = bootstrap(data,   sd(data$rating), R = sample.len)
+    else
+      boot = bootstrap(data, mean(data$rating), R = sample.len)
+    
+    result = CI.percentile(boot, probs = c(.025, .975))
+    lowerbound[i] = result[1]
+    upperbound[i] = result[2]
+  }
+ 
+  df = data.frame(movies, lowerbound, upperbound)
+  return(df)
+}
+```
+
+## Sobre os dados
+
+Para essa parte do problema usaremos dados sobre avaliações de filmes feita por pessoa de todo o mundo em um forum online. Cada filme pode receber notas entre 1-5 e possui n generos distintos.   
+
+## O que fazer
+
+Temos duas perguntas para ser respondidas em nossa pesquisa.
+
+1. Escolha uma trilogia (ou uma n-logia com n > 3) e avalie para qual dos episódios da trilogia é melhor avaliação e qual episódio possui mais variação nas notas atribuídas ao filme.
+
+2. Normalmente os filmes têm vários gêneros. Existe uma relação entre em quantos gêneros os filmes se encaixam e a avaliação que os filmes recebem? Mais especificamente: se consideramos a os filmes com 1, 2, 3, ..., n gêneros, existe alguma quantidade de gêneros num mesmo filme que em geral recebe avaliações melhores? Caso exista, estime a diferença entre essa combinação e filmes com apenas um gênero. 
 
 ```{r}
 base = get_database()
-
-t1.dat = base %>% filter(title == "Terminator, The")
-
-t2.dat = base %>% filter(title == "Terminator 2: Judgment Day")
-
-t3.dat = base %>% filter(title == "Terminator 3: Rise of the Machines")
+movies = c("Terminator, The", "Terminator 2: Judgment Day", "Terminator 3: Rise of the Machines")
 ```
 
+## Analise
 
+Os filmes escolhidos para a analise da primeira pergunta foi a trilogia original do Exterminator do futuro (Terminator) 1, 2 e 3 de 1984, 1991 e 2003 respectivamente, com um nível de confiança de 95%. 
+
+1.1. Observando a média das notas que fora atribuidas aos três filmes, não podemos concluir que o Exterminador no Futuro 1 foi melhor avaliado do que o Exterminador no Futuro 2 e vise-versa. Mas podemos inferir, com base nos dados estudados, que o Exterminador no Futuro 3 é o pior avaliado, conforme gráfico abaixo: 
+  
 ```{r}
-t1.boot = bootstrap(t1.dat, mean(as.numeric(t1.dat$rating)), R = 10000)
-mean.t1 = CI.percentile(t1.boot, probs = c(.025, .975))
-
-t2.boot = bootstrap(t2.dat, mean(as.numeric(t2.dat$rating)), R = 10000)
-mean.t2 = CI.percentile(t2.boot, probs = c(.025, .975))
-
-t3.boot = bootstrap(t3.dat, mean(as.numeric(t3.dat$rating)), R = 10000)
-mean.t3 = CI.percentile(t3.boot, probs = c(.025, .975))
-```
-
-```{r}
-df = data.frame(rbind(mean.t1, mean.t2, mean.t3))
-df$mean = c("The Terminator", "Terminator 2: Judgment Day", "Terminator 3: Rise of the Machines")
-
-df %>% 
-  ggplot(aes(x = reorder(mean, c(1, 2, 3)), ymin = X2.5., ymax = X97.5.)) + 
+df.1 = get_bootstrap(base, movies, 10000)
+df.1 %>% 
+  ggplot(aes(x = reorder(movies, c(1, 2, 3)), ymin = lowerbound, ymax = upperbound)) + 
   geom_errorbar(width = .2) + 
   xlab("Mean of Rating")
+```
+
+1.2. Observando o desvio padrão das notas que foram atribuidas aos três filmes, mas não podemos concluir que exista uma variação significativa entre os filmes, conforme gráfico abaixo:  
+
+```{r}
+df.2 = get_bootstrap(base, movies, 10000, 2)
+df.2 %>% 
+  ggplot(aes(x = reorder(movies, c(1, 2, 3)), ymin = lowerbound, ymax = upperbound)) + 
+  geom_errorbar(width = .2) + 
+  xlab("Standard Deviation of Rating")
 ```
 
