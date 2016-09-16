@@ -14,20 +14,13 @@ knitr::opts_chunk$set(fig.width=10, fig.height=6, echo=FALSE, warning=FALSE, mes
 ```
 
 ```{r}
-read <- function(file) {
-  #' Lê um csv criado a partir dos dados de gastos dos deputados da
-  require("readr", warn.conflicts = FALSE)
-
-  file = read_csv(file, col_types = list(.default = col_character()))
-  return(file)
-}
-
 get_database <- function() {
   #' Trabalha os dados de forma mais convenientemente para resolver o problema.
   require("dplyr", warn.conflicts = FALSE)
+  require("readr", warn.conflicts = FALSE)
   
-  movies = read("../datasets/movies/movies.csv")
-  rating = read("../datasets/movies/rating.csv")
+  movies = read_csv("../datasets/movies/movies.csv")
+  rating = read_csv("../datasets/movies/rating.csv")
   
   dataframe = rating %>% 
     select(-userId, -timestamp) %>% left_join(movies, by = c("movieId" = "movieId")) %>%
@@ -41,7 +34,7 @@ get_database <- function() {
 ```
 
 ```{r}
-get_bootstrap <- function(base, movies, sample.len, func = 1) {
+get_bootstrap_by_movie <- function(data, movies, resample.len, statistic) {
   require("resample")
   require("dplyr", warn.conflicts = FALSE)
   
@@ -49,12 +42,9 @@ get_bootstrap <- function(base, movies, sample.len, func = 1) {
   upperbound=c()
   
   for (i in 1:length(movies)) {
-    data = base %>% filter(title == movies[i])
-    if (func != 1)
-      boot = bootstrap(data,   sd(data$rating), R = sample.len)
-    else
-      boot = bootstrap(data, mean(data$rating), R = sample.len)
+    db = data %>% filter(title == movies[i])
     
+    boot = bootstrap(db$rating, statistic, R = resample.len)
     result = CI.percentile(boot, probs = c(.025, .975))
     lowerbound[i] = result[1]
     upperbound[i] = result[2]
@@ -62,6 +52,36 @@ get_bootstrap <- function(base, movies, sample.len, func = 1) {
  
   df = data.frame(movies, lowerbound, upperbound)
   return(df)
+}
+
+get_bootstrap_by_genres <- function(data, resample.len, statistic) {
+  require("resample")
+  require("dplyr", warn.conflicts = FALSE)
+  
+  genes = data %>% group_by(countGen) %>% filter(n() > 30, !is.na(rating)) %>% summarise()
+  genes = genes$countGen
+  
+  lowerbound=c() 
+  upperbound=c()
+  
+  for (i in 1:length(genes)) {
+    db = data %>% filter(countGen == genes[i], !is.na(rating))
+    
+    boot = bootstrap(db$rating, statistic, R = resample.len)
+    result = CI.percentile(boot, probs = c(.025, .975))
+    
+    lowerbound[i] = result[1]
+    upperbound[i] = result[2]
+  }
+  df = data.frame(genres = genes, lowerbound, upperbound)
+  return(df)
+}
+
+get_diff <- function(data, resample.len, statistic) {
+  df.diff = bootstrap2(data = data$rating, treatment = data$countGen, statistic, R = resample.len)
+
+  diff = CI.percentile(df.diff, probs = c(.025, .975))
+  return(data.frame(diff))
 }
 ```
 
@@ -78,7 +98,7 @@ Temos duas perguntas para ser respondidas em nossa pesquisa.
 2. Normalmente os filmes têm vários gêneros. Existe uma relação entre em quantos gêneros os filmes se encaixam e a avaliação que os filmes recebem? Mais especificamente: se consideramos a os filmes com 1, 2, 3, ..., n gêneros, existe alguma quantidade de gêneros num mesmo filme que em geral recebe avaliações melhores? Caso exista, estime a diferença entre essa combinação e filmes com apenas um gênero. 
 
 ```{r}
-base = get_database()
+db = get_database()
 movies = c("Terminator, The", "Terminator 2: Judgment Day", "Terminator 3: Rise of the Machines")
 ```
 
@@ -86,23 +106,44 @@ movies = c("Terminator, The", "Terminator 2: Judgment Day", "Terminator 3: Rise 
 
 Os filmes escolhidos para a analise da primeira pergunta foi a trilogia original do Exterminator do futuro (Terminator) 1, 2 e 3 de 1984, 1991 e 2003 respectivamente, com um nível de confiança de 95%. 
 
-1.1. Observando a média das notas que fora atribuidas aos três filmes, não podemos concluir que o Exterminador no Futuro 1 foi melhor avaliado do que o Exterminador no Futuro 2 e vise-versa. Mas podemos inferir, com base nos dados estudados, que o Exterminador no Futuro 3 é o pior avaliado, conforme gráfico abaixo: 
+1.1. Observando a média das notas que foram atribuidas aos três filmes, não podemos concluir que o Exterminador no Futuro 1 foi melhor avaliado do que o Exterminador no Futuro 2 e vise-versa. Mas podemos inferir, com base nos dados estudados, que o Exterminador no Futuro 3 é o pior avaliado, conforme gráfico abaixo: 
   
 ```{r}
-df.1 = get_bootstrap(base, movies, 10000)
+df.1 = get_bootstrap_by_movie(db, movies, 10000, mean)
 df.1 %>% 
   ggplot(aes(x = reorder(movies, c(1, 2, 3)), ymin = lowerbound, ymax = upperbound)) + 
   geom_errorbar(width = .2) + 
-  xlab("Mean of Rating")
+  xlab("Mean of Movies' Rating")
 ```
 
 1.2. Observando o desvio padrão das notas que foram atribuidas aos três filmes, mas não podemos concluir que exista uma variação significativa entre os filmes, conforme gráfico abaixo:  
 
 ```{r}
-df.2 = get_bootstrap(base, movies, 10000, 2)
+df.2 = get_bootstrap_by_movie(db, movies, 10000, sd)
 df.2 %>% 
   ggplot(aes(x = reorder(movies, c(1, 2, 3)), ymin = lowerbound, ymax = upperbound)) + 
   geom_errorbar(width = .2) + 
-  xlab("Standard Deviation of Rating")
+  xlab("Standard Deviation of Movies' Rating")
+```
+
+2.1 Observando a média das notas que foram atribuidas aos filmes, podemos concluir que os filmes com apenas 1 gênero são os que recebem as piores avaliação e os filmes com 7 gêneros diferentes são os que recebem as melhores avaliações. Já em relação os demais filmes não podemos concluir nada sobre a existência  de uma correlação entre suas avaliações e a quantidade de gêneros, conforme gráfico abaixo:
+
+```{r}
+df.3 = get_bootstrap_by_genres(db, 1000, mean)
+df.3 %>% 
+  ggplot(aes(x = genres, ymin = lowerbound, ymax = upperbound)) + 
+  geom_errorbar(width = .2) + 
+  xlab("Mean of Movies' Rating by Number of genres")
+```
+
+2.2 Analisando o gráfico abaixo, podemos afirma que realmente existe um diferenca entre as notas a atribuidas aos filmes com 1 e 7 gêneros, pois o intervalor de *Diff 1-7* não contém o zero.
+
+```{r}
+diff = get_diff(db %>% filter(countGen == 1 || countGen == 7, !is.na(rating)), 10000, mean)
+diff %>% 
+  ggplot(aes(x = "Diff 1-7", ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + 
+  geom_hline(yintercept = 0, colour = "darkorange") +
+  xlab("Diff between movies with 1 and 7 genres")
 ```
 
