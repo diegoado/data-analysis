@@ -1,0 +1,168 @@
+---
+title: "Speed Meetings Dating"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(car)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(ggplot2)
+library(ggfortify)
+
+library(knitr, quietly = T)
+library(modelr) # devtools::install_github("hadley/modelr")
+
+theme_set(theme_bw())
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+get_data <- function() {
+  #' Trabalha os dados de forma mais convenientemente para resolver o problema.
+  require("dplyr", warn.conflicts = FALSE)
+  require("readr", warn.conflicts = FALSE)
+  
+  meetings = read_csv("../datasets/speed-dating.csv")
+  meetings = meetings %>% 
+    select(-attr3_s, -sinc3_s, -intel3_s, -fun3_s, -amb3_s) %>%
+    rowwise() %>%
+    mutate(
+      race = as.factor(race),
+      career = tolower(career),
+      gender = if_else(gender == 0, "woman", "man"), samerace = if_else(samerace == 0, "no", "yes")
+    ) %>%
+    mutate_each(
+      funs(replace(., is.na(.), 1)), 
+      -iid, -gender, -order, -pid, -int_corr, -samerace, -age_o, -age, -field, -race, -from, -career
+    ) %>%
+    na.omit()
+  
+  return(meetings)
+}
+```
+
+## Sobre os dados
+
+Temos dados descrevendo **4765** encontros relâmpagos (speed dating) de 4 minutos envolvendo 310 jovens americanos. Os dados originais foram coletados por professores da Columbia Business School. Aqui estamos usando uma versão com menos colunas para agilizar para vocês.
+
+Os participantes tinham vários encontros de 4 minutos por noite. Após cada um, preenchiam fichas avaliando aqueles com quem se encontraram. Cada linha nos dados representa um desses encontros.
+
+## O que fazer
+
+Enumerar duas perguntas para serem respondidas utilizando os dados acima descritos usando regressão.
+
+## As perguntas
+
+1.  O que faz um pessoa receber mais **likes**? E como isso varia para diferentes sexos?
+2.  Podemos dizer que a carreira de um participante influência nos likes que ele recebe?
+
+```{r}
+meetings = get_data()
+
+like.model = 
+  meetings %>% 
+  group_by(gender) %>%
+  lm(like ~ fun + amb + attr + sinc + intel + shar*gender + prob*gender, data = .)
+
+meetings = meetings %>% 
+  add_predictions(like.model) %>% add_residuals(like.model)
+
+```
+
+## Analise
+
+**Pergunta 1**: O que faz um pessoa receber mais **likes**? E como isso varia para diferentes sexos?
+
+Vamos analizar quanto um participante **p1** gostou de um participante **p2**, criando um modelo criado para a variável **like**, que leva em consideração o sexo do participante e as seguintes variáveis:
+
+  + fun : quão divertido p1 achou p2;
+  + amb : quão ambicioso p1 achou p2;
+  + attr : quão atraente p1 achou p2;
+  + sinc : quão sincero p1 achou p2;
+  + shar : quanto p1 achou que compartilha interesses e hobbies com p2;
+  + prob : a probabiliade p1 acha que p2 tem de querer se encontrar novamente;
+  + intel : quão inteligente p1 achou p2;
+  
+E intepretar a significância, o R quadrado do modelo e também vamos fazer diagnóstico do modelo quanto aos resíduos gerados.
+
+#### **Modelo**
+
+```{r, fig.align='center'}
+meetings %>% 
+  ggplot(aes(x = like, y = pred)) + 
+  geom_point() +
+  facet_wrap(~ gender) +
+  stat_smooth(method = "lm", col = "blue", size = 1) +
+  labs(title = paste("R2 =", signif(summary(like.model)$r.squared, 4),
+                     " Intercept =", signif(like.model$coef[[1]], 4),
+                     " Slope =", signif(like.model$coef[[2]], 4),
+                     " P-Value =", signif(summary(like.model)$coef[2,4], 4))) +
+  xlab("Likes") + ylab("Predições")
+```
+
+#### **Significância**
+
+Podemos dizer que todos fatores que levamos em consideração, exceto o sexo do participante, tem significância estatística para explicar a variável **like**, conforme à analise dos intervalos de confiança abaixo:
+
+```{r, comment=NA}
+kable(tidy(like.model, conf.int = T), format = "markdown")
+```
+
+Note que através da visualização do modelo da sessão anterior e a confirmação que o o sexo do participante não tem significância estatística conforme tabela acima, podemos dizer que o sexo não influência na variação de likes que um participante recebe.  
+
+#### **R quadrado**
+
+Podemos dizer que o nosso modelo encontrado explica mais de **67%** da variação de likes da nosso amostra, conforme à analise do R quadrado abaixo:
+
+```{r, comment=NA}
+kable(glance(like.model), format = "markdown")
+```
+
+#### **Diagnóstico do modelo quanto aos resíduos gerados**
+
+Fazendo o diagnóstico da dispersão dos resíduos gerados pelo nosso modelo, observamos que para likes com valores menores que cinco o modelo subestima as suas predições e para valores maiores que cinco o modelo superestima as suas perdições na maioria da observações, conforne gráficos abaixo:
+
+```{r, fig.align='center'}
+ggplot(meetings, aes(like, resid)) + 
+  geom_point(alpha = 0.4) + 
+  geom_hline(yintercept = 0, colour = "blue") +
+  xlab("Likes") + 
+  ylab("Resíduos") +
+  ggtitle("Dispersão dos resíduos")
+
+autoplot(like.model, label.size = 3, alpha = 0.4)
+```
+
+```{r}
+like.model = 
+  meetings %>% 
+  group_by(gender) %>%
+  lm(like ~ fun + amb + attr + sinc + intel + shar + prob + career, data = .)
+
+meetings = meetings %>% 
+  add_predictions(like.model) %>% add_residuals(like.model)
+```
+
+**Pergunta 2**: Podemos dizer que a carreira de um participante influência nos likes que ele recebe?
+
+Podemos dizer que a carreira tem influência nos likes que participante recebe, causando um aumento na nossa de **7,5%** na variação explicado do modelo, conforme modelo e analise no R quadrado abaixo:
+
+```{r, fig.align='center'}
+meetings %>% 
+  ggplot(aes(x = like, y = pred)) + 
+  geom_point() +
+  facet_wrap(~ gender) +
+  stat_smooth(method = "lm", col = "blue", size = 1) +
+  labs(title = paste("R2 =", signif(summary(like.model)$r.squared, 4),
+                     " Intercept =", signif(like.model$coef[[1]], 4),
+                     " Slope =", signif(like.model$coef[[2]], 4),
+                     " P-Value =", signif(summary(like.model)$coef[2,4], 4))) +
+  xlab("Likes") + ylab("Predições")
+```
+
+```{r, comment=NA}
+kable(glance(like.model), format = "markdown")
+```
+

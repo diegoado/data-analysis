@@ -1,0 +1,191 @@
+---
+title: "Dados de opiniões sobre filmes"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(resample)
+library(dplyr, warn.conflicts = FALSE)
+library(ggplot2, warn.conflicts = FALSE)
+
+theme_set(theme_bw())
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+get_data <- function() {
+  #' Trabalha os dados de forma mais convenientemente para resolver o problema.
+  require("dplyr", warn.conflicts = FALSE)
+  require("readr", warn.conflicts = FALSE)
+  
+  movies = read_csv("../datasets/movies/movies.csv")
+  rating = read_csv("../datasets/movies/rating.csv")
+  
+  dataframe = rating %>% 
+    select(-userId, -timestamp) %>% left_join(movies, by = c("movieId" = "movieId")) %>%
+    rowwise() %>% 
+    mutate(countGen = length(unlist(strsplit(genres, '[|]'))), 
+           title = unlist(strsplit(as.character(title), " \\(.*\\)")))
+  
+  return(dataframe)
+}
+
+get_diff <- function(data, resample.len, statistic, treatment) {
+  df.diff = bootstrap2(data = data$rating, treatment = data[treatment], statistic, R = resample.len)
+
+  diff = CI.percentile(df.diff, probs = c(.025, .975))
+  return(data.frame(diff))
+}
+```
+
+```{r}
+star.movies = get_data() %>% 
+  filter(grepl('star wars|star trek', tolower(title)), title != "Star Wars: The Clone Wars") %>% 
+  rowwise() %>% mutate(saga = ifelse(grepl('star wars', tolower(title)), 'star wars', 'star trek'))
+```
+
+## Sobre os dados
+
+Para essa parte do problema usaremos dados sobre avaliações de filmes feita por pessoa de todo o mundo em um forum online. Cada filme pode receber notas entre 1-5 e possui n generos distintos.   
+
+## O que fazer
+
+Temos quatro perguntas para ser respondidas em nossa pesquisa.
+
+1. Podemos dizer que os filmes da saga Star Wars são melhores avaliados do que os filmes da sage Star Trek ? 
+
+2. Existe algum filme de Start Wars que é melhor avaliado que qualquer outro filme de Star Trek ?
+
+3. Existe alguma variação significativa na popularidade do filme "O Regresso" comparado com e os demais filmes do ator Leonardo DiCaprio que justifique o motivo do autor possui apenas um Oscar ?
+
+4. Existe algum filme que é melhor availado do que "O Regresso"? 
+
+```{r}
+sw = star.movies %>% select(title) %>% filter(grepl('star wars', tolower(title))) %>% distinct()
+
+# Star Wars Moveis
+sw = as.vector(sw$title)
+sw = append(sw, 'All', after = 0)
+
+st = star.movies %>% select(title) %>% filter(grepl('star trek', tolower(title))) %>% distinct()
+
+# Star Trek Moveis
+st = as.vector(st$title)
+st = append(st, 'All', after = 0)
+```
+
+## Analise
+
+**1**. Quando analisando a diferença da média do rating dos filmes da saga Star Trek menos a média do raing dos filmes da saga Star Wars, podemos concluir que os filmes da saga Star Wars são melhores avaliados. No entrando, ao analisarmos filme x filme das duas sagas encontramos cenários que os filmes da saga Star Trek foram melhores avaliados, divirta-se explorando cada possivel interação no gráfico.
+
+**2**. Sim, podemos constatar que o filme "Star War V: o Império Contra-Ataque"" é melhor avaliado no que qualquer outro filme de Star Trek, ou seja, este filme e muito bom mesmo. Super recomendado!.
+
+
+```{r}
+fluidPage(    
+  # Give the page a title
+  titlePanel("Star Wars Filmes vs. Star Trek Filmes"),
+  
+  # Generate a row with a sidebar
+  sidebarLayout(      
+    # Define the sidebar with one input
+    sidebarPanel(
+      selectInput('star_wars', label = 'Star Wars Movies:', 
+                  choices = sw, selected = 'All'),
+  
+      selectInput('star_trek', label = 'Star Trek Movies:',
+                  choices = st, selected = 'All'),
+      hr(),
+      helpText("Data from Grouplens (2016).")
+    ),
+    # Create a spot for the barplot
+    mainPanel(
+      renderPlot({
+        if (input$star_wars == input$star_trek) {
+          diff = get_diff(star.movies, 1000, mean, 'saga')
+        }
+        else if (input$star_wars == 'All') {
+          flag = paste(tolower(input$star_trek), 'star wars', sep='|')
+          temp_data = star.movies %>% filter(grepl(flag, tolower(title)))
+          
+          diff = get_diff(temp_data, 1000, mean, 'saga')
+        }
+        else if (input$star_trek == 'All') {
+          flag = paste(tolower(input$star_wars), 'star trek', sep='|')
+          temp_data = star.movies %>% filter(grepl(flag, tolower(title)))
+          
+          diff = get_diff(temp_data, 1000, mean, 'saga')
+        }
+        else {
+          flag = paste(c(input$star_wars, input$star_trek), collapse='|')
+          temp_data = star.movies %>% filter(grepl(flag, title))
+          
+          diff = get_diff(temp_data, 1000, mean, 'saga')
+        }
+        diff %>% 
+            ggplot(aes(x = "Diff star trek - star wars", ymin = X2.5., ymax = X97.5.)) + 
+            geom_errorbar(width = .2) + 
+            geom_hline(yintercept = 0, colour = "darkorange") +
+            xlab("Diff between Star Wars and Star Trek sagas")
+      })
+    )
+  )
+)
+```
+
+**Note**:
+
+a. Quando o intervalo de confiança da diferenças das médias esta acima de zero o filme da saga Star Trek é melhor avaliado do que o filme da saga Star Wars, caso contrario o filme da saga Star Wars é melhor avaliado.
+b. Quando o intervalo inclui o zero não podemos afirmar que exista diferenças entre os filme avaliados.
+
+```{r}
+dicaprio =
+  c('The Revenant', 'Titanic', 'Django Unchained', 'Catch Me If You Can', 'Inception', 'Gangs of New York',
+    'Wolf of Wall Street, The', 'Aviator, The', 'Departed, The', 'Great Gatsby, The', 'Shutter Island')
+
+di.movies = get_data() %>% 
+  filter(grepl(paste(dicaprio, collapse='|'), title), 
+         title != 'Raise the Titanic', 
+         title != 'Titanic Town',
+         title != 'Chambermaid on the Titanic, The')
+```
+
+**3**. Anasilando os filmes de Leonardo DiCaprio (melhor ator na minha opinião de Hollywood na atualidade) em apenas dois dos dez filmes analizados podemos afirmar que existe um diferença significativa com o Regresso de 2015, filme em que Leonardo DiCaprio ganhou o seu primeiro e único Oscar. Logo podemos dizer que não há uma razão para esta injustiça nosso conjunto de dados.
+
+**4** Sim, Gangues de Nova Iorque conforme pode ser visualizado no gráfico abaixo:
+
+```{r}
+fluidPage(    
+  # Give the page a title
+  titlePanel("O Regresso vs outros filmes de Leonardo DiCaprio"),
+  
+  # Generate a row with a sidebar
+  sidebarLayout(      
+    # Define the sidebar with one input
+    sidebarPanel(
+      selectInput('movie', label = 'DiCaprio Movies:', 
+                  choices = dicaprio[2:length(dicaprio)], selected = 'Gangs of New York'),
+      hr(),
+      helpText("Data from Grouplens (2016).")
+    ),
+    # Create a spot for the barplot
+    mainPanel(
+      renderPlot({
+        flag = paste(input$movie, 'The Revenant', sep='|')
+        temp_data = di.movies %>% filter(grepl(flag, title))
+    
+        diff = get_diff(temp_data, 1000, mean, 'title')
+
+        diff %>% 
+            ggplot(aes(x = "Diff the revenant - other movie", ymin = X2.5., ymax = X97.5.)) + 
+            geom_errorbar(width = .2) + 
+            geom_hline(yintercept = 0, colour = "darkorange") +
+            xlab("Diff between the revenant and other Leonardo DiCaprio movie")
+      })
+    )
+  )
+)
+```
+
